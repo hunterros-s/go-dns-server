@@ -5,21 +5,25 @@ import (
 	"strings"
 )
 
+const (
+	MAX_BUFFER_SIZE = 512
+	MaxJumps        = 5
+)
+
 // ByteIndex represents a position within a packet buffer
 type ByteIndex uint16
 
 // PacketBuffer represents a fixed-size buffer for handling network packets
 type PacketBuffer struct {
-	buffer   [512]byte // Fixed-size buffer to store packet data
-	position ByteIndex // Current position in the buffer
+	buffer   [MAX_BUFFER_SIZE]byte // Fixed-size buffer to store packet data
+	position ByteIndex             // Current position in the buffer
 }
 
 // NewPacketBuffer creates and initializes a new PacketBuffer
-func NewPacketBuffer() PacketBuffer {
-	return PacketBuffer{
-		buffer:   [512]byte{},
-		position: 0,
-	}
+func NewPacketBuffer(b []byte) *PacketBuffer {
+	pb := &PacketBuffer{}
+	copy(pb.buffer[:], b)
+	return pb
 }
 
 // pos returns the current position in the buffer
@@ -40,7 +44,7 @@ func (pb *PacketBuffer) seek(pos ByteIndex) {
 // read returns the byte at the current position and advances the position
 // Returns an error if the position is beyond the buffer's end
 func (pb *PacketBuffer) read() (byte, error) {
-	if pb.position >= 512 {
+	if pb.position >= MAX_BUFFER_SIZE {
 		return 0x0, fmt.Errorf("end of buffer")
 	}
 	result := pb.buffer[pb.position]
@@ -51,7 +55,7 @@ func (pb *PacketBuffer) read() (byte, error) {
 // get returns the byte at the specified position without advancing the current position
 // Returns an error if the position is beyond the buffer's end
 func (pb *PacketBuffer) get(pos ByteIndex) (byte, error) {
-	if pos >= 512 {
+	if pos >= MAX_BUFFER_SIZE {
 		return 0x0, fmt.Errorf("end of buffer")
 	}
 	return pb.buffer[pos], nil
@@ -60,7 +64,7 @@ func (pb *PacketBuffer) get(pos ByteIndex) (byte, error) {
 // get_range returns a slice of bytes from the buffer, starting at 'start' and of length 'len'
 // Returns an error if the requested range extends beyond the buffer's end
 func (pb *PacketBuffer) get_range(start, len ByteIndex) ([]byte, error) {
-	if start+len >= 512 {
+	if start+len >= MAX_BUFFER_SIZE {
 		return []byte{}, fmt.Errorf("end of buffer")
 	}
 	return pb.buffer[start : start+len], nil
@@ -69,22 +73,23 @@ func (pb *PacketBuffer) get_range(start, len ByteIndex) ([]byte, error) {
 // read_u16 reads two bytes from the current position, interprets them as a big-endian uint16, and advances the position
 // Returns an error if reading would go beyond the buffer's end
 func (pb *PacketBuffer) ReadU16() (uint16, error) {
-	if pb.position+2 >= 512 {
+	if pb.position+2 >= MAX_BUFFER_SIZE {
 		return 0, fmt.Errorf("end of buffer")
 	}
 
 	byte1 := uint16(pb.buffer[pb.position])
 	byte2 := uint16(pb.buffer[pb.position+1])
 
+	result := byte1<<8 | byte2
 	pb.step(2)
 
-	return byte1<<8 | byte2, nil
+	return result, nil
 }
 
 // read_u32 reads four bytes from the current position, interprets them as a big-endian uint32, and advances the position
 // Returns an error if reading would go beyond the buffer's end
 func (pb *PacketBuffer) ReadU32() (uint32, error) {
-	if pb.position+4 >= 512 {
+	if pb.position+4 >= MAX_BUFFER_SIZE {
 		return 0, fmt.Errorf("end of buffer")
 	}
 
