@@ -25,7 +25,7 @@ func (p *Packet) Write(buffer dns.Buffer) error {
 
 	h.SetQuestionsCount(uint16(len(p.Questions)))
 	h.SetAnswersCount(uint16(len(p.Answers)))
-	h.SetAnswersCount(uint16(len(p.Authorities)))
+	h.SetAuthoritativeEntriesCount(uint16(len(p.Authorities)))
 	h.SetResourceEntriesCount(uint16(len(p.Resources)))
 
 	err := h.Write(buffer)

@@ -51,7 +51,7 @@ func (r *a) Write(buffer dns.Buffer) error {
 		return err
 	}
 
-	if err := buffer.WriteU16(uint16(r.TTL)); err != nil {
+	if err := buffer.WriteU32(r.TTL); err != nil {
 		return err
 	}
 

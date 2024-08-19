@@ -1,9 +1,7 @@
 package udp
 
 import (
-	"encoding/hex"
 	"fmt"
-	"log"
 	"net"
 
 	"github.com/hunterros-s/go-dns-server/dns"
@@ -13,7 +11,7 @@ type UDPSocketImpl struct {
 	conn *net.UDPConn
 }
 
-func NewUDPSocket() *UDPSocketImpl {
+func NewUDPSocket() dns.UDPSocket {
 	return &UDPSocketImpl{}
 }
 
@@ -33,6 +31,10 @@ func (s *UDPSocketImpl) Bind(server dns.Server) error {
 	return nil
 }
 
+func (s *UDPSocketImpl) Unbind() error {
+	return s.conn.Close()
+}
+
 func (s *UDPSocketImpl) Send_to(data []byte, server dns.Server) error {
 	if s.conn == nil {
 		return fmt.Errorf("socket not bound")
@@ -43,8 +45,6 @@ func (s *UDPSocketImpl) Send_to(data []byte, server dns.Server) error {
 	if err != nil {
 		return err
 	}
-
-	log.Println(hex.EncodeToString(data))
 
 	// Write the data slice to the UDP connection with the specified address
 	_, err = s.conn.WriteToUDP(data, udpAddr)

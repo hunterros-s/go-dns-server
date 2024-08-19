@@ -91,7 +91,7 @@ type RecordInfo interface {
 }
 
 type Parser interface {
-	Parse(*Packet, *Buffer) error
+	Parse(Packet, Buffer) error
 }
 
 type RecordFactory interface {
@@ -113,6 +113,7 @@ type Server struct {
 
 type UDPSocket interface {
 	Bind(Server) error
+	Unbind() error
 	Send_to([]byte, Server) error
 	Recv_from([]byte) (int, Server, error)
 }

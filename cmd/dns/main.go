@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/hunterros-s/go-dns-server/dns"
 	"github.com/hunterros-s/go-dns-server/dns/buffer"
@@ -18,19 +17,44 @@ import (
 
 func main() {
 
-	log.Println("starting")
+	r_registry := registry.RecordRegistry{}
 
-	qname := "www.yahoo.com"
-	qtype := dns.MX
+	rf := factory.NewRecordFactory(func(ri dns.RecordInfo, b dns.Buffer) (dns.Record, error) {
+		factory_func, ok := r_registry.Get(ri.GetQType())
+		if !ok {
+			fmt.Printf("Unknown packet with qtype: %d\n", ri.GetQType())
+			return registry.New_unknown_record(ri, b)
+		}
+		return factory_func(ri, b)
+	})
+	qf := factory.NewQuestionFactory(packet.NewQuestion)
 
-	server := dns.Server{Address: "8.8.8.8", Port: 53}
+	parser := parser.NewParser(rf, qf)
 
-	log.Println("creating socket")
 	socket := udp.NewUDPSocket()
-	err := socket.Bind(dns.Server{Address: "0.0.0.0", Port: 43210})
+	err := socket.Bind(dns.Server{Address: "0.0.0.0", Port: 2053})
 	if err != nil {
 		log.Println(err.Error())
 		return
+	}
+
+	for {
+		err = handleQuery(socket, parser)
+		if err != nil {
+			log.Println(err.Error())
+		}
+	}
+}
+
+func lookup(qname string, qtype dns.QueryType, parser dns.Parser) (dns.Packet, error) {
+	server := dns.Server{Address: "8.8.8.8", Port: 53}
+
+	socket := udp.NewUDPSocket()
+	err := socket.Bind(dns.Server{Address: "0.0.0.0", Port: 43210})
+	defer socket.Unbind()
+	if err != nil {
+		log.Println(err.Error())
+		return nil, err
 	}
 
 	p := packet.NewPacket()
@@ -39,96 +63,110 @@ func main() {
 	p.GetHeader().SetRecursionDesired(true)
 	p.AppendQuestion(packet.NewQuestion(qname, qtype))
 
-	log.Println("outgoing packet:")
-	displayResults(p)
-
 	request_buffer := buffer.NewPacketBuffer([]byte{})
 	err = p.Write(request_buffer)
 	if err != nil {
 		log.Println(err.Error())
-		return
+		return nil, err
 	}
-
-	log.Println("sending to socket")
 	err = socket.Send_to(request_buffer.Bytes(), server)
 	if err != nil {
 		log.Println(err.Error())
-		return
+		return nil, err
 	}
-
-	log.Println("recv. from socket")
 
 	data := make([]byte, 512)
 
-	len, server, err := socket.Recv_from(data)
+	len, _, err := socket.Recv_from(data)
 	if err != nil {
 		log.Println(err.Error())
-		return
+		return nil, err
 	}
-	log.Printf("recieved %d bytes\n", len)
-	log.Println(server.Address)
-	log.Println(server.Port)
-
-	log.Println(hex.EncodeToString(data[:len]))
 
 	rec_buffer := buffer.NewPacketBuffer(data[:len])
 
-	log.Println("creating packet from response")
 	p_back := packet.NewPacket()
-	r_registry := registry.RecordRegistry{}
-
-	rf := factory.NewRecordFactory(func(ri dns.RecordInfo, b dns.Buffer) (dns.Record, error) {
-		factory_func, ok := r_registry.Get(ri.GetQType())
-		if !ok {
-			log.Println("unknown packet seen")
-			return registry.New_unknown_record(ri, b)
-		}
-		return factory_func(ri, b)
-	})
-	qf := factory.NewQuestionFactory(packet.NewQuestion)
-
-	parser := parser.NewParser(rf, qf)
 
 	parser.Parse(p_back, rec_buffer)
 
-	displayResults(p_back)
+	return p_back, nil
 }
 
-func processFile(fileName string) (dns.Packet, error) {
-	file, err := os.Open(fileName)
+func handleQuery(socket dns.UDPSocket, parser dns.Parser) error {
+	data := make([]byte, 512)
+	n, src, err := socket.Recv_from(data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+		log.Println(err.Error())
+		return err
 	}
-	defer file.Close()
-	b := make([]byte, 512)
-	_, err = file.Read(b)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
-	}
+	req_buffer := buffer.NewPacketBuffer(data[:n])
 
-	pb := buffer.NewPacketBuffer(b)
+	request := packet.NewPacket()
 
-	p := packet.NewPacket()
-	r_registry := registry.RecordRegistry{}
+	parser.Parse(request, req_buffer)
 
-	rf := factory.NewRecordFactory(func(ri dns.RecordInfo, b dns.Buffer) (dns.Record, error) {
-		factory_func, ok := r_registry.Get(ri.GetQType())
-		if !ok {
-			log.Println("unknown packet seen")
-			return registry.New_unknown_record(ri, b)
+	log.Printf("request packet: ")
+	displayPacket(request)
+
+	response := packet.NewPacket()
+	response.GetHeader().SetID(request.GetHeader().GetID())
+	response.GetHeader().SetRecursionAvailable(true)
+	response.GetHeader().SetRecursionDesired(true)
+	response.GetHeader().SetResponse(true)
+
+	questions := request.GetQuestions()
+	if len(questions) > 0 {
+		question := questions[len(questions)-1]
+
+		r, err := lookup(question.GetName(), question.GetQType(), parser)
+		if err != nil {
+			response.GetHeader().SetRescode(dns.SERVAIL)
+		} else {
+			response.AppendQuestion(question)
+			response.GetHeader().SetRescode(r.GetHeader().GetRescode())
+
+			for _, rec := range r.GetAnswers() {
+				log.Printf("Answer: ")
+				displayAsJSON(rec)
+				response.AppendAnswer(rec)
+			}
+			for _, rec := range r.GetAuthorities() {
+				log.Printf("Authority: ")
+				displayAsJSON(rec)
+				response.AppendAuthority(rec)
+			}
+			for _, rec := range r.GetResources() {
+				log.Printf("Resource: ")
+				displayAsJSON(rec)
+				response.AppendResource(rec)
+			}
 		}
-		return factory_func(ri, b)
-	})
-	qf := factory.NewQuestionFactory(packet.NewQuestion)
 
-	parser := parser.NewParser(rf, qf)
+	} else {
+		response.GetHeader().SetRescode(dns.FORMERR)
+	}
 
-	parser.Parse(p, pb)
+	response.GetHeader().SetQuestionsCount(uint16(len(response.GetQuestions())))
+	response.GetHeader().SetAnswersCount(uint16(len(response.GetAnswers())))
+	response.GetHeader().SetAuthoritativeEntriesCount(uint16(len(response.GetAuthorities())))
+	response.GetHeader().SetResourceEntriesCount(uint16(len(response.GetResources())))
 
-	return p, nil
+	log.Printf("response packet: ")
+	displayPacket(response)
+
+	response_buffer := buffer.NewPacketBuffer([]byte{})
+	err = response.Write(response_buffer)
+	if err != nil {
+		return err
+	}
+
+	log.Println(hex.EncodeToString(response_buffer.Bytes()))
+
+	socket.Send_to(response_buffer.Bytes(), src)
+	return nil
 }
 
-func displayResults(packet dns.Packet) {
+func displayPacket(packet dns.Packet) {
 	fmt.Println("main:")
 	displayAsJSON(packet)
 

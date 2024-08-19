@@ -7,7 +7,7 @@ type Parser struct {
 	questionfactory dns.QuestionFactory
 }
 
-func NewParser(rf dns.RecordFactory, qf dns.QuestionFactory) *Parser {
+func NewParser(rf dns.RecordFactory, qf dns.QuestionFactory) dns.Parser {
 	return &Parser{
 		recordfactory:   rf,
 		questionfactory: qf,
